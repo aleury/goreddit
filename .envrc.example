@@ -1,0 +1,1 @@
+export DATA_SOURCE_NAME="postgres://username:password@localhost:5432/goreddit?sslmode=disable"

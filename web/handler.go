@@ -27,6 +27,7 @@ func NewHandler(store goreddit.Store) *Handler {
 
 	h.Get("/", h.Home())
 
+	// Threads
 	h.Route("/threads", func(r chi.Router) {
 		r.Get("/", h.ThreadsList())
 		r.Get("/new", h.ThreadsNew())
@@ -38,7 +39,13 @@ func NewHandler(store goreddit.Store) *Handler {
 		r.Get("/{threadId}/posts/new", h.PostsNew())
 		r.Post("/{threadId}/posts", h.PostsCreate())
 		r.Get("/{threadId}/posts/{postId}", h.PostsShow())
+
+		// Comments
+		r.Post("/{threadId}/posts/{postId}/comments", h.CommentsCreate())
 	})
+
+	// Comments
+	h.Get("/comments/{id}/vote", h.CommentsVote())
 
 	return h
 }
@@ -215,9 +222,11 @@ func (h *Handler) PostsCreate() http.HandlerFunc {
 
 func (h *Handler) PostsShow() http.HandlerFunc {
 	type data struct {
-		Thread goreddit.Thread
-		Post   goreddit.Post
+		Thread   goreddit.Thread
+		Post     goreddit.Post
+		Comments []goreddit.Comment
 	}
+
 	tmpl := template.Must(template.ParseFiles(
 		"templates/layout.html",
 		"templates/post.html",
@@ -247,6 +256,85 @@ func (h *Handler) PostsShow() http.HandlerFunc {
 			return
 		}
 
-		tmpl.Execute(rw, data{Thread: t, Post: p})
+		cc, err := h.store.CommentsbyPost(p.ID)
+		if err != nil {
+			http.Error(rw, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		tmpl.Execute(rw, data{Thread: t, Post: p, Comments: cc})
+	}
+}
+
+func (h *Handler) CommentsCreate() http.HandlerFunc {
+	return func(rw http.ResponseWriter, r *http.Request) {
+		threadId, err := uuid.Parse(chi.URLParam(r, "threadId"))
+		if err != nil {
+			http.Error(rw, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		postId, err := uuid.Parse(chi.URLParam(r, "postId"))
+		if err != nil {
+			http.Error(rw, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		_, err = h.store.Thread(threadId)
+		if err != nil {
+			http.Error(rw, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		p, err := h.store.Post(postId)
+		if err != nil {
+			http.Error(rw, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		content := r.FormValue("content")
+
+		err = h.store.CreateComment(&goreddit.Comment{
+			ID:      uuid.New(),
+			PostID:  p.ID,
+			Content: content,
+		})
+		if err != nil {
+			http.Error(rw, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		http.Redirect(rw, r, r.Referer(), http.StatusFound)
+	}
+}
+
+func (h *Handler) CommentsVote() http.HandlerFunc {
+	return func(rw http.ResponseWriter, r *http.Request) {
+		id, err := uuid.Parse(chi.URLParam(r, "id"))
+		if err != nil {
+			http.Error(rw, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		c, err := h.store.Comment(id)
+		if err != nil {
+			http.Error(rw, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		switch r.URL.Query().Get("dir") {
+		case "up":
+			c.Votes++
+		case "down":
+			c.Votes--
+		}
+
+		err = h.store.UpdateComment(&c)
+		if err != nil {
+			http.Error(rw, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		http.Redirect(rw, r, r.Referer(), http.StatusFound)
 	}
 }

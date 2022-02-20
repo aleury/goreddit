@@ -1,6 +1,7 @@
 package web
 
 import (
+	"fmt"
 	"html/template"
 	"net/http"
 
@@ -24,38 +25,43 @@ func NewHandler(store goreddit.Store) *Handler {
 
 	h.Use(middleware.Logger)
 
+	h.Get("/", h.Home())
+
 	h.Route("/threads", func(r chi.Router) {
 		r.Get("/", h.ThreadsList())
 		r.Get("/new", h.ThreadsNew())
 		r.Post("/", h.ThreadsCreate())
+		r.Get("/{id}", h.ThreadsShow())
 		r.Post("/{id}/delete", h.ThreadsDelete())
+
+		// Posts
+		r.Get("/{threadId}/posts/new", h.PostsNew())
+		r.Post("/{threadId}/posts", h.PostsCreate())
+		r.Get("/{threadId}/posts/{postId}", h.PostsShow())
 	})
 
 	return h
 }
 
-const threadsListHTML = `
-<h1>Threads</h1>
-<dl>
-{{range .Threads}}
-	<dt><strong>{{.Title}}</strong></dt>
-	<dd>{{.Description}}</dd>
-	<dd>
-		<form action="/threads/{{.ID}}/delete" method="POST">
-			<button type="submit">Delete</button>
-		</form>
-	</dd>
-{{end}}
-</dl>
-<a href="/threads/new">Create thread</a>
-`
+func (h *Handler) Home() http.HandlerFunc {
+	tmpl := template.Must(template.ParseFiles(
+		"templates/layout.html",
+		"templates/home.html",
+	))
+	return func(rw http.ResponseWriter, r *http.Request) {
+		tmpl.Execute(rw, nil)
+	}
+}
 
 func (h *Handler) ThreadsList() http.HandlerFunc {
 	type data struct {
 		Threads []goreddit.Thread
 	}
 
-	tmpl := template.Must(template.New("").Parse(threadsListHTML))
+	tmpl := template.Must(template.ParseFiles(
+		"templates/layout.html",
+		"templates/threads.html",
+	))
 	return func(rw http.ResponseWriter, r *http.Request) {
 		tt, err := h.store.Threads()
 		if err != nil {
@@ -67,25 +73,11 @@ func (h *Handler) ThreadsList() http.HandlerFunc {
 	}
 }
 
-const threadCreateHTML = `
-<h1>New thread</h1>
-<form action="/threads" method="POST">
-	<table>
-		<tr>
-			<td>Title</td>
-			<td><input type="text" name="title" /></td>
-		</tr>
-		<tr>
-			<td>Description</td>
-			<td><input type="text" name="description" /></td>
-		</tr>
-	</table>
-	<button type="submit">Create thread</button>
-</form>
-`
-
 func (h *Handler) ThreadsNew() http.HandlerFunc {
-	tmpl := template.Must(template.New("").Parse(threadCreateHTML))
+	tmpl := template.Must(template.ParseFiles(
+		"templates/layout.html",
+		"templates/thread_create.html",
+	))
 	return func(w http.ResponseWriter, r *http.Request) {
 		tmpl.Execute(w, nil)
 	}
@@ -110,11 +102,42 @@ func (h *Handler) ThreadsCreate() http.HandlerFunc {
 	}
 }
 
+func (h *Handler) ThreadsShow() http.HandlerFunc {
+	type data struct {
+		Thread goreddit.Thread
+		Posts  []goreddit.Post
+	}
+
+	tmpl := template.Must(template.ParseFiles(
+		"templates/layout.html",
+		"templates/thread.html",
+	))
+	return func(rw http.ResponseWriter, r *http.Request) {
+		id, err := uuid.Parse(chi.URLParam(r, "id"))
+		if err != nil {
+			http.Error(rw, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		t, err := h.store.Thread(id)
+		if err != nil {
+			http.Error(rw, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		pp, err := h.store.PostsByThread(t.ID)
+		if err != nil {
+			http.Error(rw, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		tmpl.Execute(rw, data{Thread: t, Posts: pp})
+	}
+}
+
 func (h *Handler) ThreadsDelete() http.HandlerFunc {
 	return func(rw http.ResponseWriter, r *http.Request) {
-		idStr := chi.URLParam(r, "id")
-
-		id, err := uuid.Parse(idStr)
+		id, err := uuid.Parse(chi.URLParam(r, "id"))
 		if err != nil {
 			http.Error(rw, err.Error(), http.StatusBadRequest)
 			return
@@ -127,5 +150,103 @@ func (h *Handler) ThreadsDelete() http.HandlerFunc {
 		}
 
 		http.Redirect(rw, r, "/threads", http.StatusFound)
+	}
+}
+
+func (h *Handler) PostsNew() http.HandlerFunc {
+	type data struct {
+		Thread goreddit.Thread
+	}
+
+	tmpl := template.Must(template.ParseFiles(
+		"templates/layout.html",
+		"templates/post_create.html",
+	))
+	return func(rw http.ResponseWriter, r *http.Request) {
+		threadId, err := uuid.Parse(chi.URLParam(r, "threadId"))
+		if err != nil {
+			http.Error(rw, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		t, err := h.store.Thread(threadId)
+		if err != nil {
+			http.Error(rw, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		tmpl.Execute(rw, data{Thread: t})
+	}
+}
+
+func (h *Handler) PostsCreate() http.HandlerFunc {
+	return func(rw http.ResponseWriter, r *http.Request) {
+		threadId, err := uuid.Parse(chi.URLParam(r, "threadId"))
+		if err != nil {
+			http.Error(rw, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		t, err := h.store.Thread(threadId)
+		if err != nil {
+			http.Error(rw, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		title := r.FormValue("title")
+		content := r.FormValue("content")
+
+		p := &goreddit.Post{
+			ID:       uuid.New(),
+			ThreadID: t.ID,
+			Title:    title,
+			Content:  content,
+		}
+		err = h.store.CreatePost(p)
+		if err != nil {
+			http.Error(rw, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		redirect_url := fmt.Sprintf("/threads/%s/posts/%s", t.ID.String(), p.ID.String())
+		http.Redirect(rw, r, redirect_url, http.StatusFound)
+	}
+}
+
+func (h *Handler) PostsShow() http.HandlerFunc {
+	type data struct {
+		Thread goreddit.Thread
+		Post   goreddit.Post
+	}
+	tmpl := template.Must(template.ParseFiles(
+		"templates/layout.html",
+		"templates/post.html",
+	))
+	return func(rw http.ResponseWriter, r *http.Request) {
+		threadId, err := uuid.Parse(chi.URLParam(r, "threadId"))
+		if err != nil {
+			http.Error(rw, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		postId, err := uuid.Parse(chi.URLParam(r, "postId"))
+		if err != nil {
+			http.Error(rw, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		t, err := h.store.Thread(threadId)
+		if err != nil {
+			http.Error(rw, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		p, err := h.store.Post(postId)
+		if err != nil {
+			http.Error(rw, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		tmpl.Execute(rw, data{Thread: t, Post: p})
 	}
 }

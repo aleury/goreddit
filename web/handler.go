@@ -39,6 +39,7 @@ func NewHandler(store goreddit.Store) *Handler {
 		r.Get("/{threadId}/posts/new", h.PostsNew())
 		r.Post("/{threadId}/posts", h.PostsCreate())
 		r.Get("/{threadId}/posts/{postId}", h.PostsShow())
+		r.Get("/{threadId}/posts/{postId}/vote", h.PostsVote())
 
 		// Comments
 		r.Post("/{threadId}/posts/{postId}/comments", h.CommentsCreate())
@@ -51,12 +52,21 @@ func NewHandler(store goreddit.Store) *Handler {
 }
 
 func (h *Handler) Home() http.HandlerFunc {
+	type data struct {
+		Posts []goreddit.Post
+	}
+
 	tmpl := template.Must(template.ParseFiles(
 		"templates/layout.html",
 		"templates/home.html",
 	))
 	return func(rw http.ResponseWriter, r *http.Request) {
-		tmpl.Execute(rw, nil)
+		pp, err := h.store.Posts()
+		if err != nil {
+			http.Error(rw, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		tmpl.Execute(rw, data{Posts: pp})
 	}
 }
 
@@ -266,23 +276,42 @@ func (h *Handler) PostsShow() http.HandlerFunc {
 	}
 }
 
-func (h *Handler) CommentsCreate() http.HandlerFunc {
+func (h *Handler) PostsVote() http.HandlerFunc {
 	return func(rw http.ResponseWriter, r *http.Request) {
-		threadId, err := uuid.Parse(chi.URLParam(r, "threadId"))
-		if err != nil {
-			http.Error(rw, err.Error(), http.StatusBadRequest)
-			return
-		}
-
 		postId, err := uuid.Parse(chi.URLParam(r, "postId"))
 		if err != nil {
 			http.Error(rw, err.Error(), http.StatusBadRequest)
 			return
 		}
 
-		_, err = h.store.Thread(threadId)
+		p, err := h.store.Post(postId)
 		if err != nil {
 			http.Error(rw, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		switch r.URL.Query().Get("dir") {
+		case "up":
+			p.Votes++
+		case "down":
+			p.Votes--
+		}
+
+		err = h.store.UpdatePost(&p)
+		if err != nil {
+			http.Error(rw, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		http.Redirect(rw, r, r.Referer(), http.StatusFound)
+	}
+}
+
+func (h *Handler) CommentsCreate() http.HandlerFunc {
+	return func(rw http.ResponseWriter, r *http.Request) {
+		postId, err := uuid.Parse(chi.URLParam(r, "postId"))
+		if err != nil {
+			http.Error(rw, err.Error(), http.StatusBadRequest)
 			return
 		}
 

@@ -8,14 +8,11 @@ import (
 
 type Handler struct {
 	*chi.Mux
-
-	store goreddit.Store
 }
 
 func NewHandler(store goreddit.Store) *Handler {
 	h := &Handler{
-		Mux:   chi.NewMux(),
-		store: store,
+		Mux: chi.NewMux(),
 	}
 
 	pages := PageHandler{store: store}

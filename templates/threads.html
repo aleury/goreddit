@@ -4,19 +4,19 @@
 
 
 {{define "content"}}
-    {{range .Threads}}
-    <div class="card mb-4">
-        <div class="card-body">
-            <a href="/threads/{{.ID}}" class="d-block card-title text-body mt-1 h5">
-                {{.Title}}
-            </a>
-            <p class="card-text">{{.Description}}</p>
-            <a href="/threads/{{.ID}}" class="btn btn-primary">Browse Thread</a>
-        </div>
+{{range .Threads}}
+<div class="card mb-4">
+    <div class="card-body">
+        <a href="/threads/{{.ID}}" class="d-block card-title text-body mt-1 h5">
+            {{.Title}}
+        </a>
+        <p class="card-text">{{.Description}}</p>
+        <a href="/threads/{{.ID}}" class="btn btn-primary">Browse Thread</a>
     </div>
-    {{else}}
-    No threads have been created :(
-    {{end}}
+</div>
+{{else}}
+No threads have been created :(
+{{end}}
 {{end}}
 
 {{define "sidebar"}}
@@ -28,4 +28,3 @@
     </div>
 </div>
 {{end}}
-

@@ -5,17 +5,21 @@ import (
 	"net/http"
 
 	"github.com/aleury/goreddit"
+	"github.com/alexedwards/scs/v2"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/gorilla/csrf"
 )
 
 type ThreadHandler struct {
-	store goreddit.Store
+	store    goreddit.Store
+	sessions *scs.SessionManager
 }
 
 func (h *ThreadHandler) List() http.HandlerFunc {
 	type data struct {
+		SessionData
+
 		Threads []goreddit.Thread
 	}
 
@@ -30,12 +34,17 @@ func (h *ThreadHandler) List() http.HandlerFunc {
 			return
 		}
 
-		tmpl.Execute(rw, data{Threads: tt})
+		tmpl.Execute(rw, data{
+			Threads:     tt,
+			SessionData: GetSessionData(h.sessions, r.Context()),
+		})
 	}
 }
 
 func (h *ThreadHandler) New() http.HandlerFunc {
 	type data struct {
+		SessionData
+
 		CSRF template.HTML
 	}
 
@@ -45,25 +54,35 @@ func (h *ThreadHandler) New() http.HandlerFunc {
 	))
 	return func(w http.ResponseWriter, r *http.Request) {
 		tmpl.Execute(w, data{
-			CSRF: csrf.TemplateField(r),
+			CSRF:        csrf.TemplateField(r),
+			SessionData: GetSessionData(h.sessions, r.Context()),
 		})
 	}
 }
 
 func (h *ThreadHandler) Create() http.HandlerFunc {
 	return func(rw http.ResponseWriter, r *http.Request) {
-		title := r.FormValue("title")
-		description := r.FormValue("description")
+		form := CreateThreadForm{
+			Title:       r.FormValue("title"),
+			Description: r.FormValue("description"),
+		}
+		if !form.Validate() {
+			h.sessions.Put(r.Context(), "form", form)
+			http.Redirect(rw, r, r.Referer(), http.StatusFound)
+			return
+		}
 
 		err := h.store.CreateThread(&goreddit.Thread{
 			ID:          uuid.New(),
-			Title:       title,
-			Description: description,
+			Title:       form.Title,
+			Description: form.Description,
 		})
 		if err != nil {
 			http.Error(rw, err.Error(), http.StatusInternalServerError)
 			return
 		}
+
+		h.sessions.Put(r.Context(), "flash", "You new thread has been created.")
 
 		http.Redirect(rw, r, "/threads", http.StatusFound)
 	}
@@ -71,6 +90,8 @@ func (h *ThreadHandler) Create() http.HandlerFunc {
 
 func (h *ThreadHandler) Show() http.HandlerFunc {
 	type data struct {
+		SessionData
+
 		CSRF   template.HTML
 		Thread goreddit.Thread
 		Posts  []goreddit.Post
@@ -99,7 +120,12 @@ func (h *ThreadHandler) Show() http.HandlerFunc {
 			return
 		}
 
-		tmpl.Execute(rw, data{CSRF: csrf.TemplateField(r), Thread: t, Posts: pp})
+		tmpl.Execute(rw, data{
+			Thread:      t,
+			Posts:       pp,
+			CSRF:        csrf.TemplateField(r),
+			SessionData: GetSessionData(h.sessions, r.Context()),
+		})
 	}
 }
 
@@ -116,6 +142,8 @@ func (h *ThreadHandler) Delete() http.HandlerFunc {
 			http.Error(rw, err.Error(), http.StatusInternalServerError)
 			return
 		}
+
+		h.sessions.Put(r.Context(), "flash", "The thread has been deleted.")
 
 		http.Redirect(rw, r, "/threads", http.StatusFound)
 	}

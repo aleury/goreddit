@@ -6,17 +6,21 @@ import (
 	"net/http"
 
 	"github.com/aleury/goreddit"
+	"github.com/alexedwards/scs/v2"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/gorilla/csrf"
 )
 
 type PostHandler struct {
-	store goreddit.Store
+	store    goreddit.Store
+	sessions *scs.SessionManager
 }
 
 func (h *PostHandler) New() http.HandlerFunc {
 	type data struct {
+		SessionData
+
 		CSRF   template.HTML
 		Thread goreddit.Thread
 	}
@@ -38,12 +42,26 @@ func (h *PostHandler) New() http.HandlerFunc {
 			return
 		}
 
-		tmpl.Execute(rw, data{CSRF: csrf.TemplateField(r), Thread: t})
+		tmpl.Execute(rw, data{
+			Thread:      t,
+			CSRF:        csrf.TemplateField(r),
+			SessionData: GetSessionData(h.sessions, r.Context()),
+		})
 	}
 }
 
 func (h *PostHandler) Create() http.HandlerFunc {
 	return func(rw http.ResponseWriter, r *http.Request) {
+		form := CreatePostForm{
+			Title:   r.FormValue("title"),
+			Content: r.FormValue("content"),
+		}
+		if !form.Validate() {
+			h.sessions.Put(r.Context(), "form", form)
+			http.Redirect(rw, r, r.Referer(), http.StatusFound)
+			return
+		}
+
 		threadId, err := uuid.Parse(chi.URLParam(r, "threadId"))
 		if err != nil {
 			http.Error(rw, err.Error(), http.StatusBadRequest)
@@ -56,20 +74,19 @@ func (h *PostHandler) Create() http.HandlerFunc {
 			return
 		}
 
-		title := r.FormValue("title")
-		content := r.FormValue("content")
-
 		p := &goreddit.Post{
 			ID:       uuid.New(),
 			ThreadID: t.ID,
-			Title:    title,
-			Content:  content,
+			Title:    form.Title,
+			Content:  form.Content,
 		}
 		err = h.store.CreatePost(p)
 		if err != nil {
 			http.Error(rw, err.Error(), http.StatusInternalServerError)
 			return
 		}
+
+		h.sessions.Put(r.Context(), "flash", "Your new post has been created.")
 
 		redirect_url := fmt.Sprintf("/threads/%s/posts/%s", t.ID.String(), p.ID.String())
 		http.Redirect(rw, r, redirect_url, http.StatusFound)
@@ -78,6 +95,8 @@ func (h *PostHandler) Create() http.HandlerFunc {
 
 func (h *PostHandler) Show() http.HandlerFunc {
 	type data struct {
+		SessionData
+
 		CSRF     template.HTML
 		Thread   goreddit.Thread
 		Post     goreddit.Post
@@ -120,10 +139,11 @@ func (h *PostHandler) Show() http.HandlerFunc {
 		}
 
 		tmpl.Execute(rw, data{
-			CSRF:     csrf.TemplateField(r),
-			Thread:   t,
-			Post:     p,
-			Comments: cc,
+			Thread:      t,
+			Post:        p,
+			Comments:    cc,
+			CSRF:        csrf.TemplateField(r),
+			SessionData: GetSessionData(h.sessions, r.Context()),
 		})
 	}
 }

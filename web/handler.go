@@ -2,6 +2,7 @@ package web
 
 import (
 	"github.com/aleury/goreddit"
+	"github.com/alexedwards/scs/v2"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/gorilla/csrf"
@@ -11,19 +12,21 @@ type Handler struct {
 	*chi.Mux
 }
 
-func NewHandler(store goreddit.Store, csrfKey []byte) *Handler {
+func NewHandler(store goreddit.Store, sessions *scs.SessionManager, csrfKey []byte) *Handler {
 	h := &Handler{Mux: chi.NewMux()}
 
-	pages := PageHandler{store: store}
-	threads := ThreadHandler{store: store}
-	posts := PostHandler{store: store}
-	comments := CommentHandler{store: store}
+	pages := PageHandler{store: store, sessions: sessions}
+	threads := ThreadHandler{store: store, sessions: sessions}
+	posts := PostHandler{store: store, sessions: sessions}
+	comments := CommentHandler{store: store, sessions: sessions}
 
 	h.Use(middleware.Logger)
 
 	// TODO: This is for development purposes only.
 	// Set Secure flag to true when deploying to prod.
 	h.Use(csrf.Protect(csrfKey, csrf.Secure(false)))
+
+	h.Use(sessions.LoadAndSave)
 
 	h.Get("/", pages.Home())
 	h.Route("/threads", func(r chi.Router) {

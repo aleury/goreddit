@@ -11,9 +11,7 @@ type Handler struct {
 }
 
 func NewHandler(store goreddit.Store) *Handler {
-	h := &Handler{
-		Mux: chi.NewMux(),
-	}
+	h := &Handler{Mux: chi.NewMux()}
 
 	pages := PageHandler{store: store}
 	threads := ThreadHandler{store: store}

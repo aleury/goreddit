@@ -13,10 +13,10 @@ require (
 	github.com/alexedwards/scs/v2 v2.5.0
 	github.com/go-chi/chi/v5 v5.0.7
 	github.com/gorilla/csrf v1.7.1
+	golang.org/x/crypto v0.0.0-20220214200702-86341886e292
 )
 
 require (
 	github.com/gorilla/securecookie v1.1.1 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
-	golang.org/x/crypto v0.0.0-20220214200702-86341886e292 // indirect
 )
